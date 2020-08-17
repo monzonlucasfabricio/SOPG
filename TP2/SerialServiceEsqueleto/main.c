@@ -62,8 +62,14 @@ int main(void)
 	sigemptyset(&sa0.sa_mask);
 	sigemptyset(&sa1.sa_mask);
 
-	sigaction(SIGTERM,&sa0,NULL);
-	sigaction(SIGINT,&sa1,NULL);
+	if(sigaction(SIGTERM,&sa0,NULL) == -1){
+		perror("sigaction");
+		exit(1);
+	}
+	if(sigaction(SIGINT,&sa1,NULL) == -1){
+		perror("sigaction");
+		exit(1);
+	}
 
 
 	/* Inicio el puerto serie */
@@ -83,7 +89,10 @@ int main(void)
 	conection = false;
 	closeAll = false;
 
-	pthread_create(&thread, NULL, socket_thread, NULL);
+	if(pthread_create(&thread, NULL, socket_thread, NULL) != 0){
+		printf("No se puede crear el thread");
+		return 1;
+	}
 
 	while (1)
 	{
@@ -97,6 +106,10 @@ int main(void)
 			close(newfd);
 			close(fd_socket);
 			pthread_cancel(thread);
+			int err = pthread_join(thread,NULL);
+			if(err == EINVAL){
+				printf("Thread no joineable\n");
+			}
 			exit(EXIT_FAILURE);
 		}
 	}
@@ -113,6 +126,9 @@ bool socket_send(void)
 	sprintf(auxbuffer1, ":LINE%cTG\n", serialbuffer[14]);
 	printf("SE ENVIO POR EL SOCKET: %s\r\n", auxbuffer1);
 
+	pthread_mutex_lock(&mutexData);
+	if(conection == true){
+
 	//Escribo por el socket
 	int32_t retval = write(newfd, auxbuffer1, sizeof(auxbuffer1));
 	if (retval == -1)
@@ -120,6 +136,8 @@ bool socket_send(void)
 		perror("Error escribiendo mensaje en el socket\r\n");
 		exit(1);
 	}
+	}
+	pthread_mutex_unlock(&mutexData);
 }
 
 bool serial_check(void)
@@ -127,9 +145,7 @@ bool serial_check(void)
 	bool retval = 0;
 
 	// Se usa mutex por el recurso compartido
-	pthread_mutex_lock(&mutexData);
 	bytesLeidos = serial_receive(serialbuffer, sizebuffer);
-	pthread_mutex_unlock(&mutexData);
 
 	/* Si recibi algo checkear*/
 	if (bytesLeidos > 0)
@@ -243,7 +259,9 @@ void *socket_thread(void *arg)
 			char ipClient[32];
 			inet_ntop(AF_INET, &(clientaddr.sin_addr), ipClient, sizeof(ipClient));
 			printf("EL CLIENTE SE HA CONECTADO, DESDE: %s\r\n",ipClient);
+			pthread_mutex_lock(&mutexData);
 			conection = true;
+			pthread_mutex_unlock(&mutexData);
 		}
 		while (conection == true)
 		{
@@ -260,7 +278,9 @@ void *socket_thread(void *arg)
 				printf("EL CLIENTE SE HA DESCONECTADO\r\n");
 
 				/* Salgo de la conexion y vuelvo al accept */
+				pthread_mutex_lock(&mutexData);
 				conection = false;
+				pthread_mutex_unlock(&mutexData);
 			}
 
 			if (n > 0)
@@ -273,9 +293,7 @@ void *socket_thread(void *arg)
 				printf("SE ENVIO POR LA UART : %s\r\n", auxbuffer);
 
 				//Uso de mutex por el recurso compartido
-				pthread_mutex_lock(&mutexData);
 				serial_send(auxbuffer, sizeof(auxbuffer));
-				pthread_mutex_unlock(&mutexData);
 			}
 		}
 	}
